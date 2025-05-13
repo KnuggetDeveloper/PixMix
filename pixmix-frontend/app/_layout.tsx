@@ -16,9 +16,9 @@ import {
   getNotificationData,
   setupNotifications,
 } from "@/utils/notificationHelper";
-import { 
-  getCurrentUserId, 
-  testAuthenticationFlow 
+import {
+  getCurrentUserId,
+  testAuthenticationFlow,
 } from "@/services/authService";
 import { useColorScheme } from "@/hooks/useColorScheme";
 

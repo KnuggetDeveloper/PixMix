@@ -1,117 +1,165 @@
 // pixmix-frontend/services/authService.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Random from 'expo-random';
-import * as Device from 'expo-device';
 
-// Service URLs
-const AUTH_SERVICE_URL = "https://gcloud-authentication-493914627855.us-central1.run.app";
+// Service URLs - will be updated for production
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "http://localhost:4000";
 
 // Token cache
 let cachedCloudRunToken: string | null = null;
 let tokenExpiry: number | null = null;
 
-// Debug logging
+// Add debug logging
 const DEBUG = true;
 
 /**
- * Generate a device-specific identifier
+ * Get a Google identity token for service authentication
+ * In development: Manual token from gcloud auth print-identity-token
+ * In production: Will come from a dedicated token provider service
  */
-async function getDeviceIdentifier(): Promise<string> {
+async function getGoogleIdentityToken(): Promise<string> {
   try {
-    // Try to get existing device ID from storage
-    const existingId = await AsyncStorage.getItem('device_id');
-    if (existingId) {
-      return existingId;
-    }
-
-    // Generate new device ID
-    let deviceId = '';
+    if (DEBUG) console.log("[Auth] Getting Google Identity Token...");
     
-    if (Device.isDevice) {
-      // Use device-specific information for real devices
-      deviceId = `${Device.modelName}-${Device.osVersion}-${Date.now()}`;
-    } else {
-      // For simulators/emulators, use random bytes
-      const randomBytes = await Random.getRandomBytesAsync(16);
-      deviceId = Array.from(randomBytes as Uint8Array, (byte: number) => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('');
+    // In development, use environment variable
+    const manualToken = process.env.GOOGLE_IDENTITY_TOKEN || "";
+    
+    if (!manualToken) {
+      throw new Error("No Google Identity token available. Run: gcloud auth print-identity-token");
     }
-
-    // Store for future use
-    await AsyncStorage.setItem('device_id', deviceId);
-    return deviceId;
+    
+    if (DEBUG) console.log("[Auth] Google Identity Token obtained");
+    return manualToken;
   } catch (error) {
-    console.error('[Auth] Error generating device ID:', error);
-    return `fallback-${Date.now()}`;
+    console.error("[Auth] Error getting Google Identity token:", error);
+    throw error;
   }
 }
 
 /**
  * Get a Cloud Run access token from the authentication service
+ * This token will be used to authenticate with the backend service
  */
 export async function getCloudRunToken(): Promise<string> {
   try {
     if (DEBUG) console.log("[Auth] Requesting Cloud Run token from auth service...");
-
-    // Get device identifier for this request
-    const deviceId = await getDeviceIdentifier();
     
-    let retryCount = 0;
-    const maxRetries = 3;
+    // Get Google identity token first
+    const identityToken = await getGoogleIdentityToken();
+    
+    // Call the public-token endpoint with Google Identity token
+    const response = await fetch(`${AUTH_SERVICE_URL}/auth/public-token`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${identityToken}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-    while (retryCount < maxRetries) {
-      try {
-        // Call the device-auth endpoint which is more secure
-        const response = await fetch(`${AUTH_SERVICE_URL}/auth/device-token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Device-ID": deviceId,
-            "X-App-Version": process.env.EXPO_PUBLIC_APP_VERSION || "1.0.0",
-            "X-Platform": Device.osName || "unknown",
-          },
-          body: JSON.stringify({
-            deviceId,
-            platform: Device.osName,
-            appVersion: process.env.EXPO_PUBLIC_APP_VERSION || "1.0.0",
-            timestamp: Date.now(),
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`[Auth] Failed to get Cloud Run token: ${response.status} - ${errorText}`);
-          throw new Error(`Server error: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (DEBUG) {
-          console.log("[Auth] Cloud Run token received successfully");
-          console.log("[Auth] Token expires in:", data.expiresIn, "seconds");
-        }
-
-        // Cache the token
-        cachedCloudRunToken = data.token;
-        tokenExpiry = Date.now() + (data.expiresIn - 60) * 1000;
-
-        return data.token;
-      } catch (error) {
-        retryCount++;
-        if (retryCount >= maxRetries) {
-          console.error(`[Auth] Failed after ${maxRetries} attempts to get Cloud Run token`);
-          throw error;
-        }
-
-        console.warn(`[Auth] Retry ${retryCount}/${maxRetries} after error`);
-        await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Auth] Failed to get Cloud Run token: ${response.status} - ${errorText}`);
+      throw new Error(`Authentication failed: ${response.status}`);
     }
 
-    throw new Error("Failed to get Cloud Run token after retries");
+    const data = await response.json();
+    
+    if (DEBUG) {
+      console.log("[Auth] Cloud Run token received successfully");
+      console.log("[Auth] Token expires in:", data.expiresIn, "seconds");
+    }
+    
+    return data.token;
   } catch (error) {
     console.error("[Auth] Error getting Cloud Run token:", error);
     throw new Error("Failed to authenticate with service");
   }
 }
 
-// ... rest of the code remains the same ...
+/**
+ * Get a cached Cloud Run token, refreshing if necessary
+ * Tokens are cached for 50 minutes (they expire in 60 minutes)
+ */
+export async function getCachedCloudRunToken(): Promise<string> {
+  const now = Date.now();
+  
+  // Check if we have a valid cached token
+  if (cachedCloudRunToken && tokenExpiry && now < tokenExpiry) {
+    if (DEBUG) console.log("[Auth] Using cached Cloud Run token");
+    return cachedCloudRunToken;
+  }
+
+  if (DEBUG) console.log("[Auth] Token expired or not cached, refreshing...");
+  
+  // Get a new token
+  const token = await getCloudRunToken();
+  
+  // Cache for 50 minutes (tokens expire in 60 minutes)
+  cachedCloudRunToken = token;
+  tokenExpiry = now + (50 * 60 * 1000);
+  
+  return token;
+}
+
+/**
+ * Clear the token cache
+ * Useful for forcing a token refresh
+ */
+export function clearTokenCache(): void {
+  if (DEBUG) console.log("[Auth] Clearing token cache");
+  cachedCloudRunToken = null;
+  tokenExpiry = null;
+}
+
+/**
+ * Test the authentication flow
+ * This function can be used to verify the entire auth chain is working
+ */
+export async function testAuthenticationFlow(): Promise<boolean> {
+  try {
+    console.log("[Auth Test] Starting authentication flow test...");
+    
+    // Step 1: Get Google Identity Token
+    console.log("[Auth Test] Step 1: Getting Google Identity Token");
+    const identityToken = await getGoogleIdentityToken();
+    console.log("[Auth Test] ✓ Google Identity Token obtained");
+    
+    // Step 2: Get Cloud Run Token
+    console.log("[Auth Test] Step 2: Getting Cloud Run Token");
+    const cloudRunToken = await getCloudRunToken();
+    console.log("[Auth Test] ✓ Cloud Run Token obtained");
+    
+    // Step 3: Test caching
+    console.log("[Auth Test] Step 3: Testing token caching");
+    const cachedToken = await getCachedCloudRunToken();
+    console.log("[Auth Test] ✓ Token caching working");
+    
+    console.log("[Auth Test] Authentication flow test completed successfully");
+    return true;
+  } catch (error) {
+    console.error("[Auth Test] Authentication flow test failed:", error);
+    return false;
+  }
+}
+
+// Store the current user ID (for notifications)
+let currentUserId: string | null = null;
+
+export async function setCurrentUserId(userId: string): Promise<void> {
+  currentUserId = userId;
+  await AsyncStorage.setItem("user_id", userId);
+}
+
+export async function getCurrentUserId(): Promise<string | null> {
+  if (currentUserId) return currentUserId;
+  
+  const storedId = await AsyncStorage.getItem("user_id");
+  if (storedId) {
+    currentUserId = storedId;
+    return storedId;
+  }
+  
+  // Generate new user ID if none exists
+  const newId = `user_${Date.now()}`;
+  await setCurrentUserId(newId);
+  return newId;
+}
