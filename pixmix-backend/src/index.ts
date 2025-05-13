@@ -1,3 +1,4 @@
+// pixmix-backend/src/index.ts
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -10,23 +11,36 @@ dotenv.config({ path: ".env.production" });
 
 const app = express();
 
-// CORS configuration
+// CORS configuration - MUST come before routes
 const corsOptions = {
-  origin: "*", // In production, specify allowed origins
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: true, // Allow all origins, or specify allowed origins as array
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
   credentials: true,
   optionsSuccessStatus: 200,
+  preflightContinue: false,
+  maxAge: 86400,
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Handle OPTIONS requests explicitly
+app.options("*", cors(corsOptions));
+
+// Body parsing middleware
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+// Health check (no auth required)
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
 
 // Protected routes
 app.use("/generate", verifyCloudRunToken, generateRoute);
 
-// Token registration endpoint (for storing FCM tokens)
+// Token registration endpoint
 app.post("/register-token", async (req, res): Promise<any> => {
   try {
     const { userId, fcmToken, platform } = req.body;
@@ -47,11 +61,6 @@ app.post("/register-token", async (req, res): Promise<any> => {
     console.error("Token registration error:", error);
     res.status(500).json({ error: "Failed to register token" });
   }
-});
-
-// Health check
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 8080;
