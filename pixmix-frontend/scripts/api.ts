@@ -3,7 +3,7 @@ import * as Notifications from "expo-notifications";
 import { getCachedCloudRunToken } from "../services/authService";
 
 // Backend service URL - will be updated for production
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
+const BACKEND_URL = "https://pixmix-backend-493914627855.us-central1.run.app";
 
 // Debug logging
 const DEBUG = true;
