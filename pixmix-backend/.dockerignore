@@ -6,3 +6,5 @@ npm-debug.log
 .dockerignore
 uploads/*
 dist/*
+*.md
+.vscode
