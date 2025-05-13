@@ -1,4 +1,4 @@
-// app/_layout.tsx
+// pixmix-frontend/app/_layout.tsx
 import {
   DarkTheme,
   DefaultTheme,
@@ -16,9 +16,10 @@ import {
   getNotificationData,
   setupNotifications,
 } from "@/utils/notificationHelper";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { initializeFirebase } from "@/utils/firebaseInit";
-
+import { 
+  getCurrentUserId, 
+  testAuthenticationFlow 
+} from "@/services/authService";
 import { useColorScheme } from "@/hooks/useColorScheme";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -27,35 +28,43 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
 
-  // Setup notification handling
+  // Initialize app and authentication
   useEffect(() => {
     async function initializeApp() {
       try {
-        // Initialize Firebase first
-        await initializeFirebase();
+        console.log("[App] Starting initialization...");
 
-        // Get or create user ID
-        let storedUserId = await AsyncStorage.getItem("user_id");
-        if (!storedUserId) {
-          // Generate a simple user ID for demo purposes
-          storedUserId = `user_${Date.now()}`;
-          await AsyncStorage.setItem("user_id", storedUserId);
-        }
-        setUserId(storedUserId);
+        // Step 1: Get or create user ID
+        const userId = await getCurrentUserId();
+        console.log("[App] User ID:", userId);
 
-        // Setup notifications and register device
-        const success = await setupNotifications(storedUserId);
-        if (success) {
-          console.log("Notifications initialized successfully");
+        // Step 2: Test authentication flow (in development)
+        if (__DEV__) {
+          console.log("[App] Testing authentication flow...");
+          const authTest = await testAuthenticationFlow();
+          if (!authTest) {
+            console.warn("[App] Authentication test failed");
+          }
         }
+
+        // Step 3: Setup notifications
+        const notificationSetup = await setupNotifications(userId || "");
+        if (notificationSetup) {
+          console.log("[App] Notifications initialized successfully");
+        } else {
+          console.log("[App] Notifications setup failed or denied");
+        }
+
+        setIsReady(true);
       } catch (error) {
-        console.error("Error initializing app:", error);
+        console.error("[App] Error initializing app:", error);
+        setIsReady(true); // Allow app to continue even if initialization fails
       }
     }
 
@@ -65,7 +74,7 @@ export default function RootLayout() {
     const subscription = Notifications.addNotificationResponseReceivedListener(
       async (response) => {
         try {
-          console.log("Notification tapped:", response);
+          console.log("[App] Notification tapped:", response);
 
           const data = response.notification.request.content.data;
 
@@ -73,7 +82,6 @@ export default function RootLayout() {
           if (data?.dataKey) {
             const storedData = await getNotificationData(data.dataKey);
             if (storedData?.imageUrl) {
-              // Navigate to result screen
               router.push({
                 pathname: "/result",
                 params: { imageUrl: storedData.imageUrl },
@@ -90,7 +98,7 @@ export default function RootLayout() {
             });
           }
         } catch (error) {
-          console.error("Error handling notification tap:", error);
+          console.error("[App] Error handling notification tap:", error);
         }
       }
     );
@@ -101,12 +109,12 @@ export default function RootLayout() {
   }, [router]);
 
   useEffect(() => {
-    if (loaded) {
+    if (loaded && isReady) {
       SplashScreen.hideAsync();
     }
-  }, [loaded]);
+  }, [loaded, isReady]);
 
-  if (!loaded) {
+  if (!loaded || !isReady) {
     return null;
   }
 

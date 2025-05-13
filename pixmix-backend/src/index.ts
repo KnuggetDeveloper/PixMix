@@ -54,5 +54,5 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const PORT = 3000;
 app.listen(PORT, () => console.log(`Filter Backend running on port ${PORT}`));
