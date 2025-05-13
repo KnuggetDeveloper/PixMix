@@ -1,0 +1,10 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.validate.enable": true,
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "typescript.tsserver.watchOptions": {
+    "watchDirectory": "useFsEvents",
+    "excludeDirectories": ["**/node_modules"]
+  }
+}

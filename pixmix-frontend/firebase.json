@@ -1,0 +1,6 @@
+{
+  "react-native": {
+    "messaging_android_notification_channel_id": "image-processing",
+    "messaging_android_notification_color": "#3B82F6"
+  }
+}
